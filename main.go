@@ -56,7 +56,9 @@ const (
 	PacketLoginPlay       = 0x23
 	PacketPlayerAbilities = 0x2F
 	PacketSyncPosition    = 0x36
+	PacketEntityEvent     = 0x18
 	PacketPlayerInfo      = 0x34
+	PacketSpawnLocation   = 0x4A
 
 	PacketKeepalive = 0x1E
 )
@@ -102,11 +104,11 @@ func main() {
 
 	for {
 		conn, _ := listener.Accept()
-		go handleConnection(conn)
+		go handleConnection(&conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn *net.Conn) {
 	defer func(conn *net.Conn) {
 		_ = conn.Close()
 		var next *list.Element
@@ -116,7 +118,7 @@ func handleConnection(conn net.Conn) {
 				ConnectedPlayers.Remove(e)
 			}
 		}
-	}(&conn)
+	}(conn)
 
 	if EnableProxy {
 		var (
@@ -167,7 +169,7 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func handlePing(conn net.Conn) {
+func handlePing(conn *net.Conn) {
 	var p packet.Packet
 	err := conn.ReadPacket(&p)
 	if err != nil || p.ID != PacketStatusRequest {
@@ -209,7 +211,7 @@ func handlePing(conn net.Conn) {
 	_ = conn.WritePacket(res)
 }
 
-func handleLogin(conn net.Conn, protocol int) {
+func handleLogin(conn *net.Conn, protocol int) {
 	if protocol != ProtocolVersion {
 		loginKick(conn, "Unsupported version")
 		return
@@ -280,9 +282,21 @@ func handleLogin(conn net.Conn, protocol int) {
 
 	_ = conn.WritePacket(packet.Marshal(
 		PacketPlayerAbilities,
-		packet.Byte(1|2|4),
+		packet.Byte(7),
 		packet.Float(0.05),
 		packet.Float(0.1),
+	))
+
+	_ = conn.WritePacket(packet.Marshal(
+		PacketEntityEvent,
+		packet.Int(100),
+		packet.Byte(24),
+	))
+
+	_ = conn.WritePacket(packet.Marshal(
+		PacketSpawnLocation,
+		packet.Position{X: 0, Y: 60, Z: 0},
+		packet.Float(0),
 	))
 
 	_ = writePosition(conn, 0, 60, 0)
@@ -300,9 +314,11 @@ func handleLogin(conn net.Conn, protocol int) {
 		packet.Boolean(false),
 	))
 
+	_ = writePosition(conn, 0, 60, 0)
+
 	ticker := time.NewTicker(time.Second)
 
-	go func(conn net.Conn, ticker *time.Ticker) {
+	go func(conn *net.Conn, ticker *time.Ticker) {
 		for range ticker.C {
 			_ = conn.WritePacket(packet.Marshal(PacketKeepalive, packet.Long(rand.Int63())))
 			_ = writePosition(conn, 0, 60, 0)
@@ -318,18 +334,18 @@ func handleLogin(conn net.Conn, protocol int) {
 	}
 }
 
-func loginKick(conn net.Conn, message string) {
+func loginKick(conn *net.Conn, message string) {
 	msg := Message{Text: message}
 	serialized, _ := json.Marshal(msg)
 	kick := packet.Marshal(PacketKickLogin, packet.String(serialized))
 	_ = conn.WritePacket(kick)
 }
 
-func writePosition(conn net.Conn, x float64, y float64, z float64) error {
+func writePosition(conn *net.Conn, x float64, y float64, z float64) error {
 	return conn.WritePacket(packet.Marshal(
 		PacketSyncPosition,
 		packet.Double(x), packet.Double(y), packet.Double(z),
 		packet.Float(0.0), packet.Float(0.0),
-		packet.Byte(0), packet.VarInt(0), packet.Boolean(true),
+		packet.Byte(0), packet.VarInt(rand.Int()), packet.Boolean(true),
 	))
 }
