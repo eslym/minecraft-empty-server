@@ -54,9 +54,10 @@ const (
 	PacketLoginResponse = 0x02
 
 	PacketLoginPlay       = 0x23
+	PacketPluginMessage   = 0x15
 	PacketPlayerAbilities = 0x2F
 	PacketSyncPosition    = 0x36
-	PacketEntityEvent     = 0x18
+	PacketUpdateTags      = 0x68
 	PacketPlayerInfo      = 0x34
 	PacketSpawnLocation   = 0x4A
 
@@ -90,6 +91,8 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
+
+	rand.Seed(time.Now().UnixNano())
 
 	listener, err := net.ListenMC(BindAddress)
 	if err != nil {
@@ -243,11 +246,26 @@ func handleLogin(conn *net.Conn, protocol int) {
 		}
 		// No documentation for how to handle this
 	}
+
+	err = conn.WritePacket(packet.Marshal(
+		0x03,
+		packet.VarInt(3),
+	))
+
+	if err != nil {
+		return
+	}
+
+	conn.SetThreshold(3)
+
 	playerUuid := offline.NameToUUID(string(username))
 
-	success := packet.Marshal(PacketLoginResponse, packet.UUID(playerUuid), username, packet.VarInt(0))
-
-	err = conn.WritePacket(success)
+	err = conn.WritePacket(packet.Marshal(
+		PacketLoginResponse,
+		packet.UUID(playerUuid),
+		username,
+		packet.VarInt(0),
+	))
 
 	if err != nil {
 		return
@@ -281,6 +299,12 @@ func handleLogin(conn *net.Conn, protocol int) {
 	))
 
 	_ = conn.WritePacket(packet.Marshal(
+		PacketPluginMessage,
+		packet.String("minecraft:brand"),
+		packet.String("golang server"),
+	))
+
+	_ = conn.WritePacket(packet.Marshal(
 		PacketPlayerAbilities,
 		packet.Byte(7),
 		packet.Float(0.05),
@@ -288,9 +312,8 @@ func handleLogin(conn *net.Conn, protocol int) {
 	))
 
 	_ = conn.WritePacket(packet.Marshal(
-		PacketEntityEvent,
-		packet.Int(100),
-		packet.Byte(24),
+		PacketUpdateTags,
+		packet.VarInt(0),
 	))
 
 	_ = conn.WritePacket(packet.Marshal(
@@ -299,7 +322,7 @@ func handleLogin(conn *net.Conn, protocol int) {
 		packet.Float(0),
 	))
 
-	_ = writePosition(conn, 0, 60, 0)
+	_, _ = writePosition(conn, 0, 60, 0)
 
 	_ = conn.WritePacket(packet.Marshal(
 		PacketPlayerInfo,
@@ -314,14 +337,14 @@ func handleLogin(conn *net.Conn, protocol int) {
 		packet.Boolean(false),
 	))
 
-	_ = writePosition(conn, 0, 60, 0)
+	_, _ = writePosition(conn, 0, 60, 0)
 
 	ticker := time.NewTicker(time.Second)
 
 	go func(conn *net.Conn, ticker *time.Ticker) {
 		for range ticker.C {
 			_ = conn.WritePacket(packet.Marshal(PacketKeepalive, packet.Long(rand.Int63())))
-			_ = writePosition(conn, 0, 60, 0)
+			_, _ = writePosition(conn, 0, 60, 0)
 		}
 	}(conn, ticker)
 
@@ -341,11 +364,12 @@ func loginKick(conn *net.Conn, message string) {
 	_ = conn.WritePacket(kick)
 }
 
-func writePosition(conn *net.Conn, x float64, y float64, z float64) error {
-	return conn.WritePacket(packet.Marshal(
+func writePosition(conn *net.Conn, x float64, y float64, z float64) (int32, error) {
+	teleportId := rand.Int31()
+	return teleportId, conn.WritePacket(packet.Marshal(
 		PacketSyncPosition,
 		packet.Double(x), packet.Double(y), packet.Double(z),
 		packet.Float(0.0), packet.Float(0.0),
-		packet.Byte(0), packet.VarInt(rand.Int()), packet.Boolean(true),
+		packet.Byte(0), packet.VarInt(teleportId), packet.Boolean(true),
 	))
 }
