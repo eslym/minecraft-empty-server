@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/Tnze/go-mc/data/packetid"
 	"github.com/Tnze/go-mc/nbt"
 	"github.com/Tnze/go-mc/net"
 	"github.com/Tnze/go-mc/net/packet"
@@ -52,16 +53,6 @@ const (
 	PacketLoginStart    = 0x00
 	PacketKickLogin     = 0x00
 	PacketLoginResponse = 0x02
-
-	PacketLoginPlay       = 0x23
-	PacketPluginMessage   = 0x15
-	PacketPlayerAbilities = 0x2F
-	PacketSyncPosition    = 0x36
-	PacketUpdateTags      = 0x68
-	PacketPlayerInfo      = 0x34
-	PacketSpawnLocation   = 0x4A
-
-	PacketKeepalive = 0x1E
 )
 
 var ConnectedPlayers = list.New()
@@ -247,17 +238,6 @@ func handleLogin(conn *net.Conn, protocol int) {
 		// No documentation for how to handle this
 	}
 
-	err = conn.WritePacket(packet.Marshal(
-		0x03,
-		packet.VarInt(3),
-	))
-
-	if err != nil {
-		return
-	}
-
-	conn.SetThreshold(3)
-
 	playerUuid := offline.NameToUUID(string(username))
 
 	err = conn.WritePacket(packet.Marshal(
@@ -278,54 +258,54 @@ func handleLogin(conn *net.Conn, protocol int) {
 	defer log.Printf("%s(%s) disconnected", username, playerUuid.String())
 
 	_ = conn.WritePacket(packet.Marshal(
-		PacketLoginPlay,
+		packetid.ClientboundLogin,
 		packet.Int(100),        // Entity ID
 		packet.Boolean(false),  // Hardcore
 		packet.UnsignedByte(3), // Game mode
 		packet.Byte(-1),        // Previous game mode
-		packet.Array([]packet.Identifier{"world", "nether", "end"}), // Dimensions
-		packet.NBT(nbt.StringifiedMessage(dimensionCodecSNBT)),      // Dimension codec
-		packet.Identifier("minecraft:the_end"),                      // Dimension type
-		packet.Identifier("end"),                                    // Dimension
-		packet.Long(rand.Int63()),                                   // Seed
-		packet.VarInt(MaxPlayer),                                    // Max players
-		packet.VarInt(1),                                            // View distance
-		packet.VarInt(1),                                            // Simulation distance
-		packet.Boolean(false),                                       // Reduce debug info
-		packet.Boolean(true),                                        // Enable respawn screen
-		packet.Boolean(false),                                       // Is debug
-		packet.Boolean(true),                                        // Is flat
-		packet.Boolean(false),                                       // Has death location
+		packet.Array([]packet.Identifier{
+			"minecraft:overworld",
+			"minecraft:nether",
+			"minecraft:the_end",
+			"minecraft:overworld_caves",
+		}), // Dimensions
+		packet.NBT(nbt.StringifiedMessage(dimensionCodecSNBT)), // Dimension codec
+		packet.Identifier("minecraft:overworld"),               // Dimension type
+		packet.Identifier("minecraft:temp"),                    // Dimension
+		packet.Long(rand.Int63()),                              // Seed
+		packet.VarInt(MaxPlayer),                               // Max players
+		packet.VarInt(1),                                       // View distance
+		packet.VarInt(1),                                       // Simulation distance
+		packet.Boolean(false),                                  // Reduce debug info
+		packet.Boolean(true),                                   // Enable respawn screen
+		packet.Boolean(true),                                   // Is debug
+		packet.Boolean(true),                                   // Is flat
+		packet.Boolean(false),                                  // Has death location
 	))
 
 	_ = conn.WritePacket(packet.Marshal(
-		PacketPluginMessage,
+		packetid.ClientboundCustomPayload,
 		packet.String("minecraft:brand"),
 		packet.String("golang server"),
 	))
 
 	_ = conn.WritePacket(packet.Marshal(
-		PacketPlayerAbilities,
+		packetid.ClientboundChangeDifficulty,
+		packet.UnsignedByte(0),
+		packet.Boolean(true),
+	))
+
+	_ = conn.WritePacket(packet.Marshal(
+		packetid.ClientboundPlayerAbilities,
 		packet.Byte(7),
 		packet.Float(0.05),
 		packet.Float(0.1),
 	))
 
-	_ = conn.WritePacket(packet.Marshal(
-		PacketUpdateTags,
-		packet.VarInt(0),
-	))
+	_, _ = writePosition(conn, 0, 0, 0)
 
 	_ = conn.WritePacket(packet.Marshal(
-		PacketSpawnLocation,
-		packet.Position{X: 0, Y: 60, Z: 0},
-		packet.Float(0),
-	))
-
-	_, _ = writePosition(conn, 0, 60, 0)
-
-	_ = conn.WritePacket(packet.Marshal(
-		PacketPlayerInfo,
+		packetid.ClientboundPlayerInfo,
 		packet.VarInt(0),
 		packet.VarInt(1),
 		packet.UUID(playerUuid),
@@ -337,14 +317,31 @@ func handleLogin(conn *net.Conn, protocol int) {
 		packet.Boolean(false),
 	))
 
-	_, _ = writePosition(conn, 0, 60, 0)
+	_ = conn.WritePacket(packet.Marshal(
+		packetid.ClientboundSetChunkCacheCenter,
+		packet.VarInt(0),
+		packet.VarInt(0),
+	))
+
+	_ = writeChunk(conn, 0, 0)
+	_ = writeChunk(conn, 0, -1)
+	_ = writeChunk(conn, -1, -1)
+	_ = writeChunk(conn, -1, 0)
+
+	_ = conn.WritePacket(packet.Marshal(
+		packetid.ClientboundSetDefaultSpawnPosition,
+		packet.Position{X: 0, Y: 0, Z: 0},
+		packet.Float(0),
+	))
+
+	_, _ = writePosition(conn, 0, 0, 0)
 
 	ticker := time.NewTicker(time.Second)
 
 	go func(conn *net.Conn, ticker *time.Ticker) {
 		for range ticker.C {
-			_ = conn.WritePacket(packet.Marshal(PacketKeepalive, packet.Long(rand.Int63())))
-			_, _ = writePosition(conn, 0, 60, 0)
+			_ = conn.WritePacket(packet.Marshal(packetid.ClientboundKeepAlive, packet.Long(rand.Int63())))
+			_, _ = writePosition(conn, 0, 0, 0)
 		}
 	}(conn, ticker)
 
@@ -367,9 +364,26 @@ func loginKick(conn *net.Conn, message string) {
 func writePosition(conn *net.Conn, x float64, y float64, z float64) (int32, error) {
 	teleportId := rand.Int31()
 	return teleportId, conn.WritePacket(packet.Marshal(
-		PacketSyncPosition,
+		packetid.ClientboundPlayerPosition,
 		packet.Double(x), packet.Double(y), packet.Double(z),
 		packet.Float(0.0), packet.Float(0.0),
 		packet.Byte(0), packet.VarInt(teleportId), packet.Boolean(true),
+	))
+}
+
+func writeChunk(conn *net.Conn, x int, z int) error {
+	return conn.WritePacket(packet.Marshal(
+		packetid.ClientboundLevelChunkWithLight,
+		packet.Int(x), packet.Int(z),
+		packet.NBT(nbt.StringifiedMessage("{}")),
+		packet.ByteArray{},
+		packet.ByteArray{},
+		packet.Boolean(false),
+		packet.BitSet{},
+		packet.BitSet{},
+		packet.BitSet{},
+		packet.BitSet{},
+		packet.ByteArray{},
+		packet.ByteArray{},
 	))
 }
