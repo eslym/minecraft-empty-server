@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Tnze/go-mc/data/packetid"
+	"github.com/Tnze/go-mc/level"
 	"github.com/Tnze/go-mc/nbt"
 	"github.com/Tnze/go-mc/net"
 	"github.com/Tnze/go-mc/net/packet"
@@ -270,7 +271,7 @@ func handleLogin(conn *net.Conn, protocol int) {
 			"minecraft:overworld_caves",
 		}), // Dimensions
 		packet.NBT(nbt.StringifiedMessage(dimensionCodecSNBT)), // Dimension codec
-		packet.Identifier("minecraft:overworld"),               // Dimension type
+		packet.Identifier("minecraft:the_end"),                 // Dimension type
 		packet.Identifier("minecraft:temp"),                    // Dimension
 		packet.Long(rand.Int63()),                              // Seed
 		packet.VarInt(MaxPlayer),                               // Max players
@@ -302,7 +303,7 @@ func handleLogin(conn *net.Conn, protocol int) {
 		packet.Float(0.1),
 	))
 
-	_, _ = writePosition(conn, 0, 0, 0)
+	_, _ = writePosition(conn, 8, 60, 8)
 
 	_ = conn.WritePacket(packet.Marshal(
 		packetid.ClientboundPlayerInfo,
@@ -323,18 +324,15 @@ func handleLogin(conn *net.Conn, protocol int) {
 		packet.VarInt(0),
 	))
 
-	_ = writeChunk(conn, 0, 0)
-	_ = writeChunk(conn, 0, -1)
-	_ = writeChunk(conn, -1, -1)
-	_ = writeChunk(conn, -1, 0)
+	_ = writeChunk(conn, 0, 0, 256)
 
 	_ = conn.WritePacket(packet.Marshal(
 		packetid.ClientboundSetDefaultSpawnPosition,
-		packet.Position{X: 0, Y: 0, Z: 0},
+		packet.Position{X: 8, Y: 60, Z: 8},
 		packet.Float(0),
 	))
 
-	_, _ = writePosition(conn, 0, 0, 0)
+	_, _ = writePosition(conn, 8, 60, 8)
 
 	ticker := time.NewTicker(time.Second)
 
@@ -371,13 +369,15 @@ func writePosition(conn *net.Conn, x float64, y float64, z float64) (int32, erro
 	))
 }
 
-func writeChunk(conn *net.Conn, x int, z int) error {
+func writeChunk(conn *net.Conn, x int, z int, height int) error {
+	chunk := level.EmptyChunk(height)
+	data, _ := chunk.Data()
 	return conn.WritePacket(packet.Marshal(
 		packetid.ClientboundLevelChunkWithLight,
 		packet.Int(x), packet.Int(z),
 		packet.NBT(nbt.StringifiedMessage("{}")),
-		packet.ByteArray{},
-		packet.ByteArray{},
+		packet.ByteArray(data),
+		packet.ByteArray{}, // pretending block entity array
 		packet.Boolean(false),
 		packet.BitSet{},
 		packet.BitSet{},
