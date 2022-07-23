@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/Tnze/go-mc/chat"
 	"github.com/Tnze/go-mc/data/packetid"
 	"github.com/Tnze/go-mc/level"
 	"github.com/Tnze/go-mc/nbt"
@@ -33,12 +34,8 @@ type ServerVersion struct {
 type PingResponse struct {
 	Version     ServerVersion `json:"version"`
 	Players     PingPlayers   `json:"players"`
-	Description Message       `json:"description"`
+	Description chat.Message  `json:"description"`
 	FavIcon     string        `json:"favicon,omitempty"`
-}
-
-type Message struct {
-	Text string `json:"text"`
 }
 
 const (
@@ -67,12 +64,14 @@ var (
 	PrintHelp   bool
 	MaxPlayer   int
 	MOTD        string
+	Welcome     string
 )
 
 func init() {
 	flag.StringVar(&BindAddress, "bind", "0.0.0.0:25565", "The address which this server listening to")
 	flag.BoolVar(&EnableProxy, "proxy", false, "Accept PROXY header")
 	flag.StringVar(&MOTD, "motd", "An empty Minecraft Server", "MOTD for ping")
+	flag.StringVar(&Welcome, "welcome", "Welcome to minecraft empty server", "Welcome message in chat")
 	flag.IntVar(&MaxPlayer, "max", 0, "Max player can join this server, 0 or less for unlimited.")
 	flag.BoolVar(&PrintHelp, "help", false, "Print help")
 }
@@ -181,7 +180,7 @@ func handlePing(conn *net.Conn) {
 			Online: ConnectedPlayers.Len(),
 			Sample: []types.Nil{},
 		},
-		Description: Message{Text: MOTD},
+		Description: chat.Message{Text: MOTD},
 	}
 
 	serialized, _ := json.Marshal(status)
@@ -334,6 +333,15 @@ func handleLogin(conn *net.Conn, protocol int) {
 
 	_, _ = writePosition(conn, 8, 60, 8)
 
+	msg := chat.Message{Text: Welcome, Color: chat.Yellow}
+	serialized, _ := json.Marshal(msg)
+
+	_ = conn.WritePacket(packet.Marshal(
+		packetid.ClientboundSystemChat,
+		packet.String(serialized),
+		packet.VarInt(1),
+	))
+
 	ticker := time.NewTicker(time.Second)
 
 	go func(conn *net.Conn, ticker *time.Ticker) {
@@ -353,7 +361,7 @@ func handleLogin(conn *net.Conn, protocol int) {
 }
 
 func loginKick(conn *net.Conn, message string) {
-	msg := Message{Text: message}
+	msg := chat.Message{Text: message}
 	serialized, _ := json.Marshal(msg)
 	kick := packet.Marshal(PacketKickLogin, packet.String(serialized))
 	_ = conn.WritePacket(kick)
