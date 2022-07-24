@@ -77,6 +77,8 @@ func init() {
 }
 
 func main() {
+	flag.Parse()
+
 	if PrintHelp {
 		_, _ = fmt.Fprintln(os.Stderr, "Usage:")
 		flag.PrintDefaults()
